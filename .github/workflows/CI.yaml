@@ -1,0 +1,274 @@
+name: Container CI and Release
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+
+permissions: {}
+
+concurrency:
+  group: greeting-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE_NAME: ${{ github.event.repository.name }}
+  IMAGE_TAG: ci-${{ github.sha }}
+
+jobs:
+  build:
+    name: Build, test, scan and attest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4               #add sha256sum verification of checkout
+
+      - name: Lint Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+
+      - name: Set up Python
+        uses: actions/setup-python@v5       #add sha256sum verification of setup-python
+        with:
+          python-version: '3.12'
+
+      - name: Install Python validation tools
+        run: python -m pip install ruff pytest
+
+      - name: Lint supplied application (without modifying app/)
+        run: ruff check app/
+      
+      - name: Run unit tests if present
+        shell: bash
+        run: |
+          if find tests -type f -name 'test_*.py' -print -quit 2>/dev/null | grep -q .; then
+            python -m pytest -v tests/test_*.py
+          else
+            echo 'No pytest unit tests found; skipping unit tests.'
+          fi
+
+      # QEMU lets an AMD64 GitHub runner execute ARM64 containers for testing.
+      - name: Enable ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build multi-platform OCI image with BuildKit attestations
+        shell: bash
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag "${IMAGE_NAME}:${IMAGE_TAG}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --provenance=mode=max \
+            --sbom=true \
+            --output type=oci,dest=image.tar \
+            .
+
+      # Inspect the locally built OCI archive (image.tar)
+      # Verify it contains image manifests for both platforms
+      # This confirms both platform images aare included before testing and publishing.
+      - name: Install OCI inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo jq
+
+      - name: Verify OCI archive contains both target platforms
+        shell: bash
+        run: |
+          skopeo inspect --raw oci-archive:image.tar > index.json
+          jq -e '
+            [.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64")] | length >= 1
+          ' index.json
+          jq -e '
+            [.manifests[] | select(.platform.os == "linux" and .platform.architecture == "arm64")] | length >= 1
+          ' index.json
+
+
+      # Test each architecture from the *same* built OCI archive.
+      - name: Load AMD64 image for tests
+        run: |
+          skopeo copy --override-arch amd64 \
+            oci-archive:image.tar "docker-daemon:${IMAGE_NAME}:amd64-test"
+
+      - name: Load ARM64 image for tests
+        run: |
+          skopeo copy --override-arch arm64 \
+            oci-archive:image.tar "docker-daemon:${IMAGE_NAME}:arm64-test"
+
+      - name: Test HTTP and health checks on both architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'docker rm -f "${container:-}" 2>/dev/null || true' EXIT
+          for arch in amd64 arm64; do
+            container="${IMAGE_NAME}-${arch}-test"
+            docker run -d --platform "linux/${arch}" \
+              --name "$container" \
+              --read-only --cap-drop=ALL \
+              --security-opt=no-new-privileges \
+              -p 127.0.0.1:8080:8080 \
+              "${IMAGE_NAME}:${arch}-test"
+            healthy=false
+            for attempt in {1..30}; do
+              status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' "$container")"
+              if [ "$status" = healthy ]; then healthy=true; break; fi
+              if [ "$status" = unhealthy ] || [ "$status" = missing ]; then break; fi
+              sleep 2
+            done
+            if [ "$healthy" != true ]; then
+              docker logs "$container" 
+              exit 1
+            fi
+            # Smoke test the running container with Python requests.
+            python3 tests/smoke_test.py
+            docker stop -t 30 "$container"
+            docker rm "$container"
+          done
+
+      - name: Scan AMD64 image with Trivy
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:amd64-test
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      - name: Scan ARM64 image with Trivy
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:arm64-test
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+
+      
+
+      # Records the commit SHA and checksum of oci archive file (image.tar).
+      - name: Record archive identity
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_SHA" > source-commit.txt
+          sha256sum image.tar  > artifacts.sha256
+
+      # Attest the provenance and SBOM files for the OCI archive.      
+      - name: Attest OCI archive provenance
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: image.tar
+      
+
+      # GitHub Actions artifact storage, NOT GHCR; no packages:write needed.
+      - name: Upload validated image and evidence
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: validated-image
+          path: |
+            image.tar
+            source-commit.txt
+            artifacts.sha256            
+          if-no-files-found: error
+          retention-days: 7
+     
+
+  # release:
+  #   name: Verify and publish approved OCI image
+  #   needs: build
+  #   if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+  #   runs-on: ubuntu-latest
+  #   # Configure Settings > Environments > production; restrict to main.
+  #   # Required reviewers are optional and depend on GitHub plan/visibility.
+  #   environment: production
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #     # Needed to verify GitHub artifact attestations through GitHub CLI.
+  #     # No OIDC permission required merely to push to GHCR.
+  #   steps:
+  #     - name: Download exact artifact from this workflow run
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: validated-image
+
+  #     - name: Verify archive checksums and source commit
+  #       shell: bash
+  #       run: |
+  #         set -euo pipefail
+  #         sha256sum --check artifacts.sha256
+  #         test "$(cat source-commit.txt)" = "$GITHUB_SHA"
+
+  #     # Verify GitHub-signed provenance and SBOM statements for the archive.
+  #     - name: Verify GitHub artifact attestations
+  #       shell: bash
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         gh attestation verify image.tar --repo "$GITHUB_REPOSITORY"
+
+  #     - name: Install OCI inspection tools
+  #       run: |
+  #         sudo apt-get update
+  #         sudo apt-get install -y skopeo jq
+
+  #     - name: Verify platforms, OCI labels, SBOM files and BuildKit evidence
+  #       shell: bash
+  #       run: |
+  #         set -euo pipefail
+  #         skopeo inspect --raw oci-archive:image.tar > index.json
+  #         for arch in amd64 arm64; do
+  #           jq -e --arg arch "$arch" \
+  #             '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)] | length >= 1' \
+  #             index.json
+  #           jq -e '.spdxVersion | startswith("SPDX-") and (.packages | length > 0)' \
+  #             "sbom-${arch}.spdx.json"
+  #           skopeo inspect --override-arch "$arch" --config oci-archive:image.tar > "config-${arch}.json"
+  #           jq -e --arg sha "$GITHUB_SHA" \
+  #             '.config.Labels["org.opencontainers.image.revision"] == $sha' "config-${arch}.json"
+  #           jq -e --arg src "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+  #             '.config.Labels["org.opencontainers.image.source"] == $src' "config-${arch}.json"
+  #           jq -e '.config.Labels["org.opencontainers.image.created"] | length > 0' "config-${arch}.json"
+  #         done
+  #         # BuildKit's OCI attestations appear as additional index manifests.
+  #         jq -e '[.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length > 0' index.json
+
+  #     - name: Publish exact multi-platform archive to GHCR (no rebuild)
+  #       shell: bash
+  #       env:
+  #         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         set -euo pipefail
+  #         target="ghcr.io/${GITHUB_REPOSITORY,,}:${IMAGE_TAG}"
+  #         skopeo copy --all \
+  #           --dest-creds "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+  #           oci-archive:image.tar "docker://${target}"
+  #         echo "Published ${target}"
+
+  #     - name: Verify published platforms
+  #       shell: bash
+  #       env:
+  #         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         target="ghcr.io/${GITHUB_REPOSITORY,,}:${IMAGE_TAG}"
+  #         skopeo inspect --raw \
+  #           --creds "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
+  #           "docker://${target}" > published-index.json
+  #         for arch in amd64 arm64; do
+  #           jq -e --arg arch "$arch" \
+  #             '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)] | length >= 1' \
+  #             published-index.json
+  #         done
+
