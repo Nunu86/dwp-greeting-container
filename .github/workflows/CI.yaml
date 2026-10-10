@@ -106,7 +106,7 @@ jobs:
           skopeo copy --override-arch arm64 \
             oci-archive:image.tar "docker-daemon:${IMAGE_NAME}:arm64-test"
 
-      - name: Test HTTP and health checks on both architectures
+      - name: Start Container and Test HTTP and health checks on both architectures
         shell: bash
         run: |
           set -euo pipefail
@@ -165,7 +165,8 @@ jobs:
 
       # Attest the provenance and SBOM files for the OCI archive.      
       - name: Attest OCI archive provenance
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        if: false
+        #if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: image.tar
