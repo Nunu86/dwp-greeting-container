@@ -131,7 +131,7 @@ jobs:
               exit 1
             fi
             # Smoke test the running container with Python requests.
-            python3 tests/smoke_test.py
+            python3 tests/smoke-test.py
             docker stop -t 30 "$container"
             docker rm "$container"
           done
