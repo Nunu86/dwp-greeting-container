@@ -4,22 +4,20 @@ name: CI
     branches:
       - main
   
-  workflow_dispatch:
-
-permissions:
-  contents: read
- 
+  workflow_dispatch: 
 
 env:
   IMAGE_NAME: ${{ github.event.repository.name }}
-  IMAGE_TAG: ci-${{ github.sha }}
-
+  IMAGE_TAG: ci-${{ github.sha }} 
+  TEST_CONTAINER: ${{ github.event.repository.name }}-test-container
 
 jobs:
   build:
-    name: Build and validate Docker image
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'    
+    name: Build and validate Docker image        
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -43,38 +41,40 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build \
-            --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} \
-            --label org.opencontainers.image.revision=${{ github.sha }} \
-            --label org.opencontainers.image.created=${{date -u +%Y-%m-%dT%H:%M:%SZ}} \
+          docker build \           
             -t "${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" \
             .
 
       - name: Start test container
         run: |
-          docker run -d --name ${{env.IMAGE_NAME}}-test-container \
+          docker run -d --name ${{env.TEST_CONTAINER}} \
           --read-only \
           --cap-drop=ALL \
           --security-opt=no-new-privileges \
-          -p 8080:8080 "$IMAGE_NAME:$IMAGE_TAG"
+          -p 8080:8080 "${{env.IMAGE_NAME}}:${{env.IMAGE_TAG}}"
 
       - name: Wait for container health check        
         run: |
           for attempt in {1..30}; do
-            status=$(docker inspect --format='{{.State.Health.Status}}' $IMAGE_NAME-test-container)
+            status=$(docker inspect --format='{{.State.Health.Status}}' ${{env.TEST_CONTAINER}})
             if [ "$status" == "healthy" ]; then
               echo "Container is healthy."
               exit 0
             fi
             if [ "$status" == "unhealthy" ]; then
-              echo "ERROR:Container health check timed out."
-              docker logs $IMAGE_NAME-test-container              
+              echo "Container is unhealthy."
+              docker logs ${{env.TEST_CONTAINER}}              
+              exit 1
+            fi
+            if ["$(docker inspect --format='{{.State.Running}}' ${{env.TEST_CONTAINER}})" !== "true" ]; then
+              echo "Container has exited unexpectedly."
+              docker logs ${{env.TEST_CONTAINER}}
               exit 1
             fi
             sleep 2
           done
-          docker logs $IMAGE_NAME-test-container
           echo "Container health check timed out."
+          docker logs ${{env.TEST_CONTAINER}}         
           exit 1
 
       - name: Run HTTP smoke tests
@@ -83,19 +83,22 @@ jobs:
       - name: Clean up test container
         if: always()
         run: |
-          if docker container inspect $IMAGE_NAME-test-container > /dev/null 2>&1; then            
-          docker logs $IMAGE_NAME-test-container 
-          docker stop -t 30 $IMAGE_NAME-test-container 
-          docker rm $IMAGE_NAME-test-container 
+          if docker container inspect ${{env.TEST_CONTAINER}} > /dev/null 2>&1; then            
+          docker logs ${{env.TEST_CONTAINER}} 
+          docker stop -t 30 ${{env.TEST_CONTAINER}} 
+          docker rm ${{env.TEST_CONTAINER}} 
           fi
 
-permissions:  
- packages: write
+
   release:
     name: Publish Docker image to GHCR
-    if: github.event_name == 'workflow_dispatch' && github.event_name !== 'pull_request'
+    needs: build    
     runs-on: ubuntu-latest
-    depends-on: build
+    permissions:
+      contents: read
+      packages: write
+    if: github.event_name == 'workflow_dispatch' && github.event_name !== 'pull_request' 
+    
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
