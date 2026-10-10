@@ -275,7 +275,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          IMAGE="${REGISTRY}/${IMAGE_NAME,,}:${VERSION}"
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
           skopeo copy \
             --all \
             --preserve-digests \
