@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.0.0"
+        required: true
+        type: string
 
 
 permissions: {}
@@ -15,6 +20,9 @@ concurrency:
 env:
   IMAGE_NAME: ${{ github.event.repository.name }}
   IMAGE_TAG: ci-${{ github.sha }}
+  VERSION: ${{ inputs.version }}
+  REGISTRY: ghcr.io
+  IMAGE_REPOSITORY: ${{ github.repository }}
 
 jobs:
   build:
@@ -186,90 +194,125 @@ jobs:
           retention-days: 7
      
 
-  # release:
-  #   name: Verify and publish approved OCI image
-  #   needs: build
-  #   if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-  #   runs-on: ubuntu-latest
-  #   # Configure Settings > Environments > production; restrict to main.
-  #   # Required reviewers are optional and depend on GitHub plan/visibility.
-  #   environment: production
-  #   permissions:
-  #     contents: read
-  #     packages: write
-  #     # Needed to verify GitHub artifact attestations through GitHub CLI.
-  #     # No OIDC permission required merely to push to GHCR.
-  #   steps:
-  #     - name: Download exact artifact from this workflow run
-  #       uses: actions/download-artifact@v4
-  #       with:
-  #         name: validated-image
+  release:
+    name: Verify and publish approved OCI image to GHCR
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest 
+  
+    permissions:
+      contents: read
+      packages: write
+    
+    concurrency:
+      group: ${{ github.workflow }}-release
+      cancel-in-progress: false   
+      
 
-  #     - name: Verify archive checksums and source commit
-  #       shell: bash
-  #       run: |
-  #         set -euo pipefail
-  #         sha256sum --check artifacts.sha256
-  #         test "$(cat source-commit.txt)" = "$GITHUB_SHA"
+    steps:
+      - name: Validate release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must use X.Y.Z, e.g. 1.0.0"
+            exit 1
+          fi
 
-  #     # Verify GitHub-signed provenance and SBOM statements for the archive.
-  #     - name: Verify GitHub artifact attestations
-  #       shell: bash
-  #       env:
-  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         gh attestation verify image.tar --repo "$GITHUB_REPOSITORY"
+      - name: Download validated OCI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: validated-image
+          path: release-artifact
 
-  #     - name: Install OCI inspection tools
-  #       run: |
-  #         sudo apt-get update
-  #         sudo apt-get install -y skopeo jq
+      - name: Verify artifact integrity
+        working-directory: release-artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c artifacts.sha256
+          if [[ "$(cat source-commit.txt)" != "$GITHUB_SHA" ]]; then
+            echo "Artifact source commit does not match workflow commit"
+            exit 1
+          fi  
 
-  #     - name: Verify platforms, OCI labels, SBOM files and BuildKit evidence
-  #       shell: bash
-  #       run: |
-  #         set -euo pipefail
-  #         skopeo inspect --raw oci-archive:image.tar > index.json
-  #         for arch in amd64 arm64; do
-  #           jq -e --arg arch "$arch" \
-  #             '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)] | length >= 1' \
-  #             index.json
-  #           jq -e '.spdxVersion | startswith("SPDX-") and (.packages | length > 0)' \
-  #             "sbom-${arch}.spdx.json"
-  #           skopeo inspect --override-arch "$arch" --config oci-archive:image.tar > "config-${arch}.json"
-  #           jq -e --arg sha "$GITHUB_SHA" \
-  #             '.config.Labels["org.opencontainers.image.revision"] == $sha' "config-${arch}.json"
-  #           jq -e --arg src "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-  #             '.config.Labels["org.opencontainers.image.source"] == $src' "config-${arch}.json"
-  #           jq -e '.config.Labels["org.opencontainers.image.created"] | length > 0' "config-${arch}.json"
-  #         done
-  #         # BuildKit's OCI attestations appear as additional index manifests.
-  #         jq -e '[.manifests[] | select(.annotations["vnd.docker.reference.type"] == "attestation-manifest")] | length > 0' index.json
+      - name: Install OCI inspection tools (skopeo)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
 
-  #     - name: Publish exact multi-platform archive to GHCR (no rebuild)
-  #       shell: bash
-  #       env:
-  #         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         set -euo pipefail
-  #         target="ghcr.io/${GITHUB_REPOSITORY,,}:${IMAGE_TAG}"
-  #         skopeo copy --all \
-  #           --dest-creds "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
-  #           oci-archive:image.tar "docker://${target}"
-  #         echo "Published ${target}"
+      - name: Authenticate to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" |
+            skopeo login "$REGISTRY" \
+              --username "$GITHUB_ACTOR" \
+              --password-stdin  
 
-  #     - name: Verify published platforms
-  #       shell: bash
-  #       env:
-  #         GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  #       run: |
-  #         target="ghcr.io/${GITHUB_REPOSITORY,,}:${IMAGE_TAG}"
-  #         skopeo inspect --raw \
-  #           --creds "${GITHUB_ACTOR}:${GHCR_TOKEN}" \
-  #           "docker://${target}" > published-index.json
-  #         for arch in amd64 arm64; do
-  #           jq -e --arg arch "$arch" \
-  #             '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch)] | length >= 1' \
-  #             published-index.json
-  #         done
+      - name: Check release version is unused
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+          if skopeo inspect --raw "docker://${IMAGE}" \
+              > /dev/null 2> registry-error.txt; then
+            echo "Release version ${VERSION} already exists"
+            exit 1
+          fi
+
+          if grep -Eqi 'manifest unknown|manifest_unknown|name unknown|name_unknown' registry-error.txt; then
+            echo "Version ${VERSION} is available"
+          else
+            echo "Unable to confirm version availability"
+            cat registry-error.txt
+            exit 1
+          fi
+
+      - name: Publish validated OCI image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME,,}:${VERSION}"
+          skopeo copy \
+            --all \
+            --preserve-digests \
+            --digestfile published-digest.txt \
+            oci-archive:release-artifact/image.tar \
+            "docker://${IMAGE}"
+          echo "Published ${IMAGE}"
+
+      - name: Verify published digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+          EXPECTED=$(cat published-digest.txt)
+          ACTUAL=$(skopeo inspect --raw \
+           "docker://${IMAGE}" | sha256sum | cut -d' ' -f1)
+            if [[ "$EXPECTED" != "sha256:$ACTUAL" ]]; then
+              echo "Published digest verification failed"
+              exit 1
+            fi
+          echo "Published digest verified: ${EXPECTED}"
+
+      - name: Release summary
+        shell: bash
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+          {
+            echo "## Container Release"
+            echo ""
+            echo "- Image: \`${IMAGE}\`"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Digest: \`$(cat published-digest.txt)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+
+
+
+
+
 
