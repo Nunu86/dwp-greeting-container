@@ -312,6 +312,14 @@ jobs:
             fi
           echo "Published digest verified: ${EXPECTED}"
 
+      - name: Record original manifest digests
+        shell: bash
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+          skopeo inspect --raw "docker://${IMAGE}" |
+            jq -r '.manifests[].digest' | sort > before.txt
+
+
       - name: Add GHCR image index description
         shell: bash
         run: | 
@@ -324,6 +332,14 @@ jobs:
           skopeo inspect --raw "docker://${IMAGE}" | \
           jq -e '.annotations["org.opencontainers.image.description"] == "Secure multi-platform Python greeting application"'
           
+      - name: Verify manifest integrity
+        shell: bash
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+          skopeo inspect --raw "docker://${IMAGE}" |
+            jq -r '.manifests[].digest' | sort > after.txt
+          diff -u before.txt after.txt
+          echo "PASS: All platform and attestation manifests are unchanged"
 
       - name: Release summary
         shell: bash
