@@ -79,8 +79,7 @@ jobs:
             --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \            
             --provenance=mode=max \
             --sbom=true \
-            --output type=oci,dest=image.tar \
-            .
+            --output type=oci,dest=image.tar . \
 
       # Inspect the locally built OCI archive (image.tar)
       # Verify it contains image manifests for both platforms
