@@ -63,7 +63,7 @@ jobs:
 
       # QEMU lets an AMD64 GitHub runner execute ARM64 containers for testing.
       - name: Enable ARM64 emulation
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a #v4.4.0
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 #v4.4.0
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  #v4.4.1
@@ -144,7 +144,7 @@ jobs:
           done
 
       - name: Scan AMD64 image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:amd64-test
           format: table
@@ -153,7 +153,7 @@ jobs:
           ignore-unfixed: true
 
       - name: Scan ARM64 image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 #v0.36.0
         with:
           image-ref: ${{ env.IMAGE_NAME }}:arm64-test
           format: table
@@ -174,7 +174,7 @@ jobs:
       - name: Attest OCI archive provenance
         if: false
         #if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@e4d4f7c39adfa4c260fb5c147f0622000aa14b99  #v4.2.2
         with:
           subject-path: image.tar
       
@@ -182,7 +182,7 @@ jobs:
       # GitHub Actions artifact storage, NOT GHCR; no packages:write needed.
       - name: Upload validated image and evidence
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 #v7.0.2
         with:
           name: validated-image
           path: |
@@ -219,7 +219,7 @@ jobs:
           fi
 
       - name: Download validated OCI artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 #v7.0.0
         with:
           name: validated-image
           path: release-artifact
