@@ -76,8 +76,7 @@ jobs:
             --tag "${IMAGE_NAME}:${IMAGE_TAG}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
-            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --annotation "index:org.opencontainers.image.description=Secure multi-platform Python greeting application" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \            
             --provenance=mode=max \
             --sbom=true \
             --output type=oci,dest=image.tar \
@@ -297,6 +296,16 @@ jobs:
               exit 1
             fi
           echo "Published digest verified: ${EXPECTED}"
+
+      - name: Add GHCR image index description
+        shell: bash
+        run: | 
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}" 
+          docker buildx imagetools create \
+          --annotation "index:org.opencontainers.image.description=Secure multi-platform Python greeting application" \
+          --tag "${IMAGE}" \
+          "${IMAGE}"
 
       - name: Release summary
         shell: bash
