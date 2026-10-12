@@ -1,52 +1,54 @@
-
-.git
+```dockerignore
+# Git and GitHub
+.git/
 .gitignore
-.github
+.github/
 
-
+# Python cache and compiled files
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
 
-
+# Python virtual environments
 .venv/
 venv/
 env/
 
-
+# Testing and coverage
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
-
 tests/
+
+# Environment variables and secrets
 .env
 .env.*
 *.pem
 *.key
 
-
+# IDE and operating system files
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
+# Build and distribution artifacts
 build/
 dist/
 *.egg-info/
 
+# Temporary and backup files
 *.swp
 *.bak
-
-
-*.log
 *.tmp
+*.log
 
-
+# Documentation
 README.md
 SECURITY.md
 CONTRIBUTING.md
 LICENSE
+*.markdown
 .markdownlint-cli2.yaml
-
+```
