@@ -98,9 +98,7 @@ jobs:
             --output type=oci,dest=image.tar \
             .
 
-      # Inspect the locally built OCI archive (image.tar)
-      # Verify it contains image manifests for both platforms
-      # This confirms both platform images aare included before testing and publishing.
+      
       - name: Install OCI inspection tools
         run: |
           sudo apt-get update
@@ -360,45 +358,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking SBOM..."
-          docker buildx imagetools inspect "$IMAGE" \
-            --format '{{json .SBOM}}' | jq -e 'select(. != null and . != {})'
-          echo "Checking provenance..."
-          docker buildx imagetools inspect "$IMAGE" \
-            --format '{{json .Provenance}}' | jq -e 'select(. != null and . != {})'
-
-
-      # - name: Record original manifest digests
-      #   shell: bash
-      #   run: |
-      #     IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
-      #     skopeo inspect --raw "docker://${IMAGE}" |
-      #       jq -r '.manifests[].digest' | sort > before.txt
-
-
-      # - name: Add GHCR image index description
-      #   shell: bash
-      #   env:
-      #     IMAGE_DESCRIPTION: ${{ github.event.repository.description || github.event.repository.name }}
-      #   run: |           
-      #     set -euo pipefail
-      #     IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
-      #     docker buildx imagetools create \
-      #     --annotation "index:org.opencontainers.image.description=${IMAGE_DESCRIPTION}" \
-      #     --tag "${IMAGE}" \
-      #     "${IMAGE}"
-      #     skopeo inspect --raw "docker://${IMAGE}" | \
-      #     jq -e --arg description "${IMAGE_DESCRIPTION}" \
-      #     '.annotations["org.opencontainers.image.description"] == $description'
-
-      # - name: Verify manifest integrity
-      #   shell: bash
-      #   run: |
-      #     IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
-      #     skopeo inspect --raw "docker://${IMAGE}" |
-      #       jq -r '.manifests[].digest' | sort > after.txt
-      #     diff -u before.txt after.txt
-      #     echo "PASS: All platform and attestation manifests are unchanged"
+          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+          echo "Inspecting published OCI index..."
+          skopeo inspect --raw "docker://${IMAGE}" > published-index.json
+          jq -e '
+            [
+              .manifests[]
+              | select(
+                  .annotations["vnd.docker.reference.type"] == "attestation-manifest"
+                )
+            ] | length >= 2
+          ' published-index.json
+          echo "PASS: BuildKit attestation manifests found"     
 
       - name: Release summary
         shell: bash
