@@ -129,6 +129,22 @@ jobs:
           skopeo copy --override-arch arm64 \
             oci-archive:image.tar "docker-daemon:${IMAGE_NAME}:arm64-test"
 
+      - name: Verify imported image architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in amd64 arm64; do
+          actual=$(docker image inspect \
+          --format '{{.Os}}/{{.Architecture}}' \
+          "${IMAGE_NAME}:${arch}-test")
+          expected="linux/${arch}"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "FAIL: Expected ${expected}, got ${actual}"
+            exit 1
+          fi
+          echo "PASS: ${IMAGE_NAME}:${arch}-test is ${actual}"
+          done
+
       - name: Start Container and Test HTTP and health checks on both architectures
         shell: bash
         run: |
@@ -218,6 +234,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      attestations: read
 
     concurrency:
       group: ${{ github.workflow }}-release
@@ -263,7 +280,7 @@ jobs:
       #     --signer-repo "${IMAGE_REPOSITORY}" \
       #     --signer-workflow "${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
 
-      - name: Set up Docker Buildx (to apply image description annotation)
+      - name: Set up Docker Buildx (to verify SBOM and Provinance)
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  #v4.4.1
 
       - name: Install OCI inspection tool (skopeo)
@@ -282,16 +299,16 @@ jobs:
               --username "$GITHUB_ACTOR" \
               --password-stdin
 
-      - name: Authenticate Docker to GHCR
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "$GHCR_TOKEN" |
-            docker login "$REGISTRY" \
-              --username "$GITHUB_ACTOR" \
-              --password-stdin
+      # - name: Authenticate Docker to GHCR
+      #   env:
+      #     GHCR_TOKEN: ${{ github.token }}
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     echo "$GHCR_TOKEN" |
+      #       docker login "$REGISTRY" \
+      #         --username "$GITHUB_ACTOR" \
+      #         --password-stdin
 
       - name: Check release version is unused
         shell: bash
@@ -338,6 +355,18 @@ jobs:
               exit 1
             fi
           echo "Published digest verified: ${EXPECTED}"
+
+      - name: Verify published SBOM and provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking SBOM..."
+          docker buildx imagetools inspect "$IMAGE" \
+            --format '{{json .SBOM}}' | jq -e 'select(. != null and . != {})'
+          echo "Checking provenance..."
+          docker buildx imagetools inspect "$IMAGE" \
+            --format '{{json .Provenance}}' | jq -e 'select(. != null and . != {})'
+
 
       # - name: Record original manifest digests
       #   shell: bash
