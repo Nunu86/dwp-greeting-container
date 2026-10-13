@@ -251,6 +251,18 @@ jobs:
             exit 1
           fi
 
+      # - name: Verify OCI archive attestation
+      #   working-directory: release-artifact
+      #   env:
+      #     GH_TOKEN: ${{ github.token }}
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     gh attestation verify image.tar \
+      #     --repo "${IMAGE_REPOSITORY}" \
+      #     --signer-repo "${IMAGE_REPOSITORY}" \
+      #     --signer-workflow "${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
+
       - name: Set up Docker Buildx (to apply image description annotation)
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  #v4.4.1
 
@@ -327,37 +339,37 @@ jobs:
             fi
           echo "Published digest verified: ${EXPECTED}"
 
-      - name: Record original manifest digests
-        shell: bash
-        run: |
-          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
-          skopeo inspect --raw "docker://${IMAGE}" |
-            jq -r '.manifests[].digest' | sort > before.txt
+      # - name: Record original manifest digests
+      #   shell: bash
+      #   run: |
+      #     IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+      #     skopeo inspect --raw "docker://${IMAGE}" |
+      #       jq -r '.manifests[].digest' | sort > before.txt
 
 
-      - name: Add GHCR image index description
-        shell: bash
-        env:
-          IMAGE_DESCRIPTION: ${{ github.event.repository.description || github.event.repository.name }}
-        run: |           
-          set -euo pipefail
-          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
-          docker buildx imagetools create \
-          --annotation "index:org.opencontainers.image.description=${IMAGE_DESCRIPTION}" \
-          --tag "${IMAGE}" \
-          "${IMAGE}"
-          skopeo inspect --raw "docker://${IMAGE}" | \
-          jq -e --arg description "${IMAGE_DESCRIPTION}" \
-          '.annotations["org.opencontainers.image.description"] == $description'
+      # - name: Add GHCR image index description
+      #   shell: bash
+      #   env:
+      #     IMAGE_DESCRIPTION: ${{ github.event.repository.description || github.event.repository.name }}
+      #   run: |           
+      #     set -euo pipefail
+      #     IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+      #     docker buildx imagetools create \
+      #     --annotation "index:org.opencontainers.image.description=${IMAGE_DESCRIPTION}" \
+      #     --tag "${IMAGE}" \
+      #     "${IMAGE}"
+      #     skopeo inspect --raw "docker://${IMAGE}" | \
+      #     jq -e --arg description "${IMAGE_DESCRIPTION}" \
+      #     '.annotations["org.opencontainers.image.description"] == $description'
 
-      - name: Verify manifest integrity
-        shell: bash
-        run: |
-          IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
-          skopeo inspect --raw "docker://${IMAGE}" |
-            jq -r '.manifests[].digest' | sort > after.txt
-          diff -u before.txt after.txt
-          echo "PASS: All platform and attestation manifests are unchanged"
+      # - name: Verify manifest integrity
+      #   shell: bash
+      #   run: |
+      #     IMAGE="${REGISTRY}/${IMAGE_REPOSITORY,,}:${VERSION}"
+      #     skopeo inspect --raw "docker://${IMAGE}" |
+      #       jq -r '.manifests[].digest' | sort > after.txt
+      #     diff -u before.txt after.txt
+      #     echo "PASS: All platform and attestation manifests are unchanged"
 
       - name: Release summary
         shell: bash
