@@ -21,21 +21,19 @@ FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \    
-    PATH="/opt/venv/bin:$PATH" 
-
-LABEL org.opencontainers.image.title="greeting-app" \
-      org.opencontainers.image.description="A containerised Python greeting application"
-    
+    PATH="/opt/venv/bin:$PATH"    
 
 WORKDIR /app
 
-COPY --from=build /opt/venv /opt/venv
-
-RUN   addgroup -S -g 10001 appgroup \
-      && adduser -S -D -H -u 10001 -G appgroup appuser 
-         
+COPY --from=build /opt/venv /opt/venv         
 
 COPY app/app.py .
+
+RUN   addgroup -S -g 10001 appgroup \
+      && adduser -S -D -H -u 10001 -G appgroup appuser
+
+LABEL org.opencontainers.image.title="greeting-app" \
+      org.opencontainers.image.description="A containerised Python greeting application" 
 
 USER 10001:10001 
 
