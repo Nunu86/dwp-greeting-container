@@ -266,11 +266,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          set -euo pipefail
-          gh --version
+          set -euo pipefail          
           gh attestation verify image.tar \
-          --repo "${IMAGE_REPOSITORY}"          
-        #--signer-workflow "github.com/${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
+          --repo "${IMAGE_REPOSITORY}" \         
+          --signer-workflow "github.com/${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
       
 
       - name: Install OCI inspection tool (skopeo)
