@@ -1,18 +1,50 @@
-FROM python:3.12@sha256:63828510c8b5ccce3bf0d6fabd6f3d17d4effa1ffe690f80a67c8e2d394e03ee
+#####################################################################################################
+# Stage 1: Build
+#####################################################################################################
+FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 AS build
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    gcc \
-    curl \
-    vim
+WORKDIR /build
+
+COPY app/requirements.txt .
+
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install \
+    --no-cache-dir \
+    -r requirements.txt
+
+#####################################################################################################
+# Stage 2: Runtime
+#####################################################################################################
+FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4 AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-COPY . .
+COPY --from=build /opt/venv /opt/venv
 
-RUN pip install -r app/requirements.txt
+COPY app/app.py .
+
+RUN   addgroup -S -g 10001 appgroup \
+      && adduser -S -D -H -u 10001 -G appgroup appuser
+
+LABEL org.opencontainers.image.title="greeting-app" \
+      org.opencontainers.image.description="A MultiPlatform (amd64 & arm64) compartible containerised Python greeting application"
+
+USER 10001:10001
 
 EXPOSE 8080
 
-# The whole context was copied to /app, so the app package lives in /app/app.
-CMD ["gunicorn", "--chdir", "app", "--bind", "0.0.0.0:8080", "--workers", "2", "app:app"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz',timeout=2).read()"]
+
+CMD ["gunicorn", \
+     "--bind", "0.0.0.0:8080", \
+     "--workers", "2", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--worker-tmp-dir", "/dev/shm", \
+     "--graceful-timeout", "25", \
+     "app:app"]
