@@ -1,5 +1,3 @@
-# Multi-stage build separates dependency installation from the runtime image.
-# This improves build isolation and keeps the runtime environment minimal.
 #####################################################################################################
 # Stage 1: Build
 #####################################################################################################
@@ -33,7 +31,7 @@ RUN   addgroup -S -g 10001 appgroup \
       && adduser -S -D -H -u 10001 -G appgroup appuser
 
 LABEL org.opencontainers.image.title="greeting-app" \
-      org.opencontainers.image.description="A containerised Python greeting application" 
+      org.opencontainers.image.description="A MultiPlatform (amd64 & arm64) compartible containerised Python greeting application" 
 
 USER 10001:10001 
 

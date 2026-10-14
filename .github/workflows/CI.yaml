@@ -199,8 +199,8 @@ jobs:
           sha256sum image.tar  > artifacts.sha256
       
       - name: Attest OCI archive artifact origin and workflow identity
-        if: false
-        #if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        #if: false
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  #v4.2.2
         with:
           subject-path: image.tar
@@ -261,17 +261,17 @@ jobs:
             exit 1
           fi
 
-      # - name: Verify OCI archive attestation
-      #   working-directory: release-artifact
-      #   env:
-      #     GH_TOKEN: ${{ github.token }}
-      #   shell: bash
-      #   run: |
-      #     set -euo pipefail
-      #     gh attestation verify image.tar \
-      #     --repo "${IMAGE_REPOSITORY}" \
-      #     --signer-repo "${IMAGE_REPOSITORY}" \
-      #     --signer-workflow "${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
+      - name: Verify OCI archive attestation
+        working-directory: release-artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh attestation verify image.tar \
+          --repo "${IMAGE_REPOSITORY}" \
+          --signer-repo "${IMAGE_REPOSITORY}" \
+          --signer-workflow "${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
       
 
       - name: Install OCI inspection tool (skopeo)

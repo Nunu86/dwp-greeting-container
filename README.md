@@ -18,10 +18,11 @@ A secure, multi-platform container solution for the supplied Python greeting app
 | **Containerisation** | Multi-stage Docker build |
 | **Runtime** | Gunicorn, non-root user |
 | **Architectures** | AMD64 and ARM64 |
+| **Secrets scanning** | Gitleaks |
 | **Code quality** | Hadolint, Ruff |
 | **Testing** | Pytest, HTTP smoke tests, health checks |
 | **Security scanning** | Trivy — HIGH/CRITICAL |
-| **Supply chain** | SBOM, provenance, SHA-256 verification |
+| **Supply chain** | SBOM, provenance, SHA-256 verification, GitHub Attestation |
 | **Registry** | GitHub Container Registry (GHCR) |
 | **Automation** | GitHub Actions, Dependabot |
 
@@ -35,19 +36,20 @@ The pipeline separates **automated validation** from **controlled publishing**.
 
 Every pull request targeting `main` triggers:
 
-1. **Linting** — Hadolint and Ruff.
-2. **Testing** — Pytest and container smoke tests.
-3. **Build** — Multi-platform OCI image for AMD64 and ARM64.
-4. **Security** — Trivy vulnerability scanning.
-5. **Supply chain** — SBOM and build provenance.
-6. **Verification** — Image integrity and checksums.
+1. **Secret scanning** — Gitleaks.
+2. **Linting** — Hadolint and Ruff.
+3. **Testing** — Pytest and container smoke tests.
+4. **Build** — Multi-platform OCI image for AMD64 and ARM64.
+5. **Security** — Trivy vulnerability scanning.
+6. **Supply chain** — SBOM and build provenance.
+7. **Verification** — Image integrity and checksums.
 
 ### Controlled Release
 
 A manually triggered workflow:
 
 - Retrieves the previously validated image artifact.
-- Verifies its SHA-256 checksum and source commit.
+- Verifies its SHA-256 checksum, source commit and GitHub attestation.
 - Publishes a versioned image to GHCR.
 - Verifies the published image digest.
 
