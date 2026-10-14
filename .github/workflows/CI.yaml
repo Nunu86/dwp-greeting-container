@@ -26,7 +26,7 @@ env:
 
 jobs:
   build:
-    name: Build, test, scan and attest
+    name: Secret check, lint, build, test, scan and attest
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -104,7 +104,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y skopeo jq
 
-      - name: Verify OCI archive contains both target platforms
+      - name: Verify OCI archive artifact contains both target platforms
         shell: bash
         run: |
           skopeo inspect --raw oci-archive:image.tar > index.json
@@ -269,8 +269,7 @@ jobs:
         run: |
           set -euo pipefail
           gh attestation verify image.tar \
-          --repo "${IMAGE_REPOSITORY}" \
-          --signer-repo "${IMAGE_REPOSITORY}" \
+          --repo "${IMAGE_REPOSITORY}" \          
           --signer-workflow "${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
       
 
