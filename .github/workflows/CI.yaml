@@ -268,9 +268,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          gh --version
           gh attestation verify image.tar \
           --repo "${IMAGE_REPOSITORY}" \          
-          --signer-workflow "${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
+        #--signer-workflow "github.com/${IMAGE_REPOSITORY}/.github/workflows/CI.yaml"
       
 
       - name: Install OCI inspection tool (skopeo)
